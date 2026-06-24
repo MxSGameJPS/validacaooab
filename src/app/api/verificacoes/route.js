@@ -43,13 +43,19 @@ export async function POST(request) {
     const documento = await fileFieldToBase64(formData, "documento", { required: true });
     const selfieRosto = await fileFieldToBase64(formData, "selfie_rosto", { required: false });
 
-    const { status, motivo, analise, documentoPath, selfiePath } = await processarVerificacao({
+    const resultado = await processarVerificacao({
       nomeCadastro,
       oabCadastro,
       ufCadastro,
       documento,
       selfieRosto,
     });
+
+    // Este endpoint não tem como pedir nova foto ao usuário (sem tela),
+    // então uma falha recuperável (RETRY) aqui sempre vira revisão manual.
+    const status = resultado.status === "RETRY" ? "MANUAL_REVIEW" : resultado.status;
+    const motivo = resultado.motivo;
+    const { analise, documentoPath, selfiePath } = resultado;
 
     const db = getSupabaseAdmin();
 

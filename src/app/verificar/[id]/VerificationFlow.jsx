@@ -5,6 +5,7 @@ import Image from "next/image";
 import CameraCapture from "./CameraCapture";
 
 const LOGIN_URL = "https://www.socialjuridico.com.br/login";
+const WHATSAPP_SUPORTE = "5515981657317";
 
 export default function VerificationFlow({ sessaoId }) {
   const [etapa, setEtapa] = useState("carregando");
@@ -15,6 +16,7 @@ export default function VerificationFlow({ sessaoId }) {
   const [selfieBlob, setSelfieBlob] = useState(null);
   const [resultado, setResultado] = useState(null);
   const [erroEnvio, setErroEnvio] = useState(null);
+  const [avisoRetomar, setAvisoRetomar] = useState(null);
 
   useEffect(() => {
     fetch(`/api/sessoes/${sessaoId}`)
@@ -52,6 +54,7 @@ export default function VerificationFlow({ sessaoId }) {
   }
 
   function aoCapturarDocumento(blob) {
+    setAvisoRetomar(null);
     setDocumentoBlob(blob);
     setEtapa("captura_selfie");
   }
@@ -59,11 +62,13 @@ export default function VerificationFlow({ sessaoId }) {
   function aoEscolherArquivoDigital(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setAvisoRetomar(null);
     setDocumentoBlob(file);
     setEtapa("captura_selfie");
   }
 
   function aoCapturarSelfie(blob) {
+    setAvisoRetomar(null);
     setSelfieBlob(blob);
     enviar(documentoBlob, blob);
   }
@@ -86,6 +91,19 @@ export default function VerificationFlow({ sessaoId }) {
       if (!data.success) {
         setErroEnvio(data.message || "Falha ao enviar a verificação.");
         setEtapa("erro_envio");
+        return;
+      }
+
+      if (data.status === "RETRY") {
+        setAvisoRetomar(data.motivo);
+
+        if (data.retomar === "documento") {
+          setDocumentoBlob(null);
+          setEtapa(tipoCna === "fisica" ? "captura_documento" : "upload_documento_digital");
+        } else {
+          setSelfieBlob(null);
+          setEtapa("captura_selfie");
+        }
         return;
       }
 
@@ -146,6 +164,7 @@ export default function VerificationFlow({ sessaoId }) {
         {etapa === "upload_documento_digital" && (
           <div style={styles.center}>
             <h2 style={styles.titulo}>Envie sua CNA digital</h2>
+            {avisoRetomar && <AvisoRetomar mensagem={avisoRetomar} />}
             <p style={styles.texto}>Aceitamos imagem (JPG/PNG) ou PDF, até 8MB.</p>
             <label style={styles.botaoPrimario}>
               Enviar CNA digital
@@ -162,7 +181,8 @@ export default function VerificationFlow({ sessaoId }) {
         {etapa === "captura_documento" && (
           <div style={styles.center}>
             <h2 style={styles.titulo}>Foto da sua CNA</h2>
-            <p style={styles.texto}>Posicione o documento dentro da moldura.</p>
+            {avisoRetomar && <AvisoRetomar mensagem={avisoRetomar} />}
+            <p style={styles.texto}>Posicione o documento dentro da moldura, com boa luz e sem reflexo.</p>
             <CameraCapture
               overlay="documento"
               facingMode="environment"
@@ -175,7 +195,11 @@ export default function VerificationFlow({ sessaoId }) {
         {etapa === "captura_selfie" && (
           <div style={styles.center}>
             <h2 style={styles.titulo}>Agora, sua selfie</h2>
-            <p style={styles.texto}>Centralize seu rosto dentro da moldura.</p>
+            {avisoRetomar && <AvisoRetomar mensagem={avisoRetomar} />}
+            <p style={styles.texto}>
+              Centralize seu rosto dentro da moldura. Retire boné, touca, óculos escuros
+              ou qualquer acessório que cubra o rosto.
+            </p>
             <CameraCapture
               overlay="oval"
               facingMode="user"
@@ -205,14 +229,25 @@ export default function VerificationFlow({ sessaoId }) {
         )}
 
         {etapa === "resultado" && resultado && (
-          <ResultadoFinal resultado={resultado} />
+          <ResultadoFinal resultado={resultado} nome={sessao?.nome} />
         )}
       </div>
     </main>
   );
 }
 
-function ResultadoFinal({ resultado }) {
+function AvisoRetomar({ mensagem }) {
+  return <p style={styles.aviso}>{mensagem} Tire a foto novamente.</p>;
+}
+
+function linkWhatsappSuporte(nome) {
+  const texto = `Olá, meu cadastro no Social Jurídico não foi verificado automaticamente${
+    nome ? ` (${nome})` : ""
+  } e preciso de ajuda.`;
+  return `https://wa.me/${WHATSAPP_SUPORTE}?text=${encodeURIComponent(texto)}`;
+}
+
+function ResultadoFinal({ resultado, nome }) {
   if (resultado.status === "VERIFIED") {
     return (
       <div style={styles.center}>
@@ -244,9 +279,17 @@ function ResultadoFinal({ resultado }) {
     <div style={styles.center}>
       <h2 style={styles.titulo}>Não foi possível verificar</h2>
       <p style={styles.texto}>
-        Os dados do documento não coincidem com o cadastro informado. Verifique as
-        informações e entre em contato com o suporte se o problema persistir.
+        Os dados do documento não coincidem com o cadastro informado. Fale com nosso
+        suporte pelo WhatsApp pra resolver isso.
       </p>
+      <a
+        href={linkWhatsappSuporte(nome)}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={styles.botaoWhatsapp}
+      >
+        Falar com o suporte no WhatsApp
+      </a>
     </div>
   );
 }
@@ -294,5 +337,25 @@ const styles = {
     padding: "12px 24px",
     cursor: "pointer",
     textAlign: "center",
+  },
+  botaoWhatsapp: {
+    background: "#25d366",
+    color: "#0d2b18",
+    border: "none",
+    borderRadius: 8,
+    padding: "12px 24px",
+    fontWeight: 600,
+    cursor: "pointer",
+    textAlign: "center",
+    textDecoration: "none",
+  },
+  aviso: {
+    color: "#f5b942",
+    fontSize: 13,
+    background: "rgba(245, 185, 66, 0.12)",
+    border: "1px solid rgba(245, 185, 66, 0.4)",
+    borderRadius: 8,
+    padding: "8px 12px",
+    lineHeight: 1.4,
   },
 };

@@ -28,12 +28,12 @@ export async function processarVerificacao({
   analise.nome_compativel =
     analise.nome_compativel || nomesCorrespondem(nomeCadastro, analise.nome_extraido);
 
-  const { status, motivo } = decidirResultado(analise);
+  const { status, motivo, retomar } = decidirResultado(analise);
 
   const documentoPath = await uploadVerificacaoFile(documento, "documentos");
   const selfiePath = selfieRosto
     ? await uploadVerificacaoFile(selfieRosto, "selfies")
     : null;
 
-  return { status, motivo, analise, documentoPath, selfiePath };
+  return { status, motivo, retomar, analise, documentoPath, selfiePath };
 }

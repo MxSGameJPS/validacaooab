@@ -7,6 +7,8 @@ export const runtime = "nodejs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const MAX_TENTATIVAS = 3;
+
 /**
  * POST /api/sessoes/{id}/enviar
  *
@@ -16,6 +18,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
  * janela de tempo curta e a um advogado_id já definido na criação.
  *
  * Form-data: documento (obrigatório), selfie_rosto (opcional)
+ *
+ * Falhas recuperáveis (documento ilegível, selfie de baixa confiança)
+ * devolvem status "RETRY" sem finalizar a sessão, para o usuário poder
+ * tentar de novo — até MAX_TENTATIVAS, depois disso vira MANUAL_REVIEW.
  */
 export async function POST(request, { params }) {
   const { id } = await params;
@@ -53,7 +59,7 @@ export async function POST(request, { params }) {
     const documento = await fileFieldToBase64(formData, "documento", { required: true });
     const selfieRosto = await fileFieldToBase64(formData, "selfie_rosto", { required: false });
 
-    const { status, motivo, analise, documentoPath, selfiePath } = await processarVerificacao({
+    const resultado = await processarVerificacao({
       nomeCadastro: sessao.nome_cadastro,
       oabCadastro: sessao.oab_cadastro,
       ufCadastro: sessao.uf_cadastro,
@@ -61,14 +67,41 @@ export async function POST(request, { params }) {
       selfieRosto,
     });
 
+    const { status, motivo, retomar, analise, documentoPath, selfiePath } = resultado;
+    const tentativas = (sessao.tentativas || 0) + 1;
+
+    if (status === "RETRY" && tentativas < MAX_TENTATIVAS) {
+      await db
+        .from("sessoes_verificacao")
+        .update({ tentativas, analise_ia: analise })
+        .eq("id", id);
+
+      return json({
+        success: true,
+        status: "RETRY",
+        retomar,
+        motivo,
+        tentativas_restantes: MAX_TENTATIVAS - tentativas,
+      });
+    }
+
+    // Esgotou as tentativas com falha recuperável: vira revisão manual
+    // em vez de deixar o usuário tentando pra sempre.
+    const statusFinal = status === "RETRY" ? "MANUAL_REVIEW" : status;
+    const motivoFinal =
+      status === "RETRY"
+        ? `${motivo} (limite de ${MAX_TENTATIVAS} tentativas atingido)`
+        : motivo;
+
     await db
       .from("sessoes_verificacao")
       .update({
-        status,
-        motivo,
+        status: statusFinal,
+        motivo: motivoFinal,
         analise_ia: analise,
         documento_path: documentoPath,
         selfie_rosto_path: selfiePath,
+        tentativas,
         completed_at: new Date().toISOString(),
       })
       .eq("id", id);
@@ -78,8 +111,8 @@ export async function POST(request, { params }) {
       await dispararWebhook(sessao.callback_url, {
         sessao_id: id,
         advogado_id: sessao.advogado_id,
-        status,
-        motivo,
+        status: statusFinal,
+        motivo: motivoFinal,
       });
       webhookEntregue = true;
     } catch (webhookError) {
@@ -96,9 +129,9 @@ export async function POST(request, { params }) {
 
     return json({
       success: true,
-      status,
-      motivo,
-      revisao_manual: status === "MANUAL_REVIEW",
+      status: statusFinal,
+      motivo: motivoFinal,
+      revisao_manual: statusFinal === "MANUAL_REVIEW",
     });
   } catch (error) {
     if (error instanceof HttpError) {
