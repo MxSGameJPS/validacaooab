@@ -269,8 +269,17 @@ function ResultadoFinal({ resultado, nome }) {
         <h2 style={styles.titulo}>Verificação em análise</h2>
         <p style={styles.texto}>
           Não conseguimos confirmar automaticamente. Nossa equipe vai analisar seus
-          dados manualmente e você receberá um e-mail em breve.
+          dados manualmente e você receberá um e-mail em breve. Se preferir, fale agora
+          com nosso suporte pelo WhatsApp.
         </p>
+        <a
+          href={linkWhatsappSuporte(nome)}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={styles.botaoWhatsapp}
+        >
+          Falar com o suporte no WhatsApp
+        </a>
       </div>
     );
   }
