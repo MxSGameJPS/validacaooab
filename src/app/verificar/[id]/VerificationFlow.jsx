@@ -5,7 +5,8 @@ import Image from "next/image";
 import CameraCapture from "./CameraCapture";
 
 const LOGIN_URL = "https://www.socialjuridico.com.br/login";
-const WHATSAPP_SUPORTE = "5515981657317";
+const WHATSAPP_PRINCIPAL = "5515981657317";
+const WHATSAPP_ATENDIMENTO = "5515992653066";
 
 export default function VerificationFlow({ sessaoId }) {
   const [etapa, setEtapa] = useState("carregando");
@@ -240,11 +241,34 @@ function AvisoRetomar({ mensagem }) {
   return <p style={styles.aviso}>{mensagem} Tire a foto novamente.</p>;
 }
 
-function linkWhatsappSuporte(nome) {
+function linkWhatsappSuporte(nome, numero) {
   const texto = `Olá, meu cadastro no Social Jurídico não foi verificado automaticamente${
     nome ? ` (${nome})` : ""
   } e preciso de ajuda.`;
-  return `https://wa.me/${WHATSAPP_SUPORTE}?text=${encodeURIComponent(texto)}`;
+  return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
+}
+
+function BotoesWhatsapp({ nome }) {
+  return (
+    <div style={styles.acoesColuna}>
+      <a
+        href={linkWhatsappSuporte(nome, WHATSAPP_PRINCIPAL)}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={styles.botaoWhatsapp}
+      >
+        WhatsApp principal
+      </a>
+      <a
+        href={linkWhatsappSuporte(nome, WHATSAPP_ATENDIMENTO)}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={styles.botaoWhatsapp}
+      >
+        WhatsApp de atendimento
+      </a>
+    </div>
+  );
 }
 
 function ResultadoFinal({ resultado, nome }) {
@@ -272,14 +296,7 @@ function ResultadoFinal({ resultado, nome }) {
           dados manualmente e você receberá um e-mail em breve. Se preferir, fale agora
           com nosso suporte pelo WhatsApp.
         </p>
-        <a
-          href={linkWhatsappSuporte(nome)}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={styles.botaoWhatsapp}
-        >
-          Falar com o suporte no WhatsApp
-        </a>
+        <BotoesWhatsapp nome={nome} />
       </div>
     );
   }
@@ -291,14 +308,7 @@ function ResultadoFinal({ resultado, nome }) {
         Os dados do documento não coincidem com o cadastro informado. Fale com nosso
         suporte pelo WhatsApp pra resolver isso.
       </p>
-      <a
-        href={linkWhatsappSuporte(nome)}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={styles.botaoWhatsapp}
-      >
-        Falar com o suporte no WhatsApp
-      </a>
+      <BotoesWhatsapp nome={nome} />
     </div>
   );
 }
