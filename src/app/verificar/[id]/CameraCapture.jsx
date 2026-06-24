@@ -88,13 +88,54 @@ export default function CameraCapture({ overlay, facingMode, onCapturar, onCance
       });
   }
 
+  function aoEscolherArquivoFallback(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFoto(URL.createObjectURL(file));
+    onCapturar(file);
+  }
+
+  // Fallback que usa o app de câmera nativo do celular em vez de
+  // getUserMedia. Funciona mesmo em navegadores embutidos restritos
+  // (ex.: link aberto direto de dentro do app de e-mail) ou quando a
+  // pessoa negou a permissão de câmera no navegador por engano — nesses
+  // casos não dá pra simplesmente pedir a permissão de novo.
+  const botaoFallback = (
+    <label style={styles.linkFallback}>
+      Problema com a câmera? Tirar foto pelo app do celular
+      <input
+        type="file"
+        accept="image/*"
+        capture={facingMode === "user" ? "user" : "environment"}
+        onChange={aoEscolherArquivoFallback}
+        style={{ display: "none" }}
+      />
+    </label>
+  );
+
   if (erro) {
     return (
       <div style={styles.erroBox}>
         <p>{erro}</p>
-        <button style={styles.botaoSecundario} onClick={onCancelar}>
-          Voltar
-        </button>
+        <p style={styles.erroDica}>
+          Isso pode acontecer se você abriu esse link direto de dentro do app de
+          e-mail, ou se a permissão de câmera foi negada antes.
+        </p>
+        <div style={styles.acoes}>
+          <button style={styles.botaoSecundario} onClick={onCancelar}>
+            Voltar
+          </button>
+          <label style={styles.botaoPrimario}>
+            Tirar foto
+            <input
+              type="file"
+              accept="image/*"
+              capture={facingMode === "user" ? "user" : "environment"}
+              onChange={aoEscolherArquivoFallback}
+              style={{ display: "none" }}
+            />
+          </label>
+        </div>
       </div>
     );
   }
@@ -115,14 +156,17 @@ export default function CameraCapture({ overlay, facingMode, onCapturar, onCance
       <canvas ref={canvasRef} style={{ display: "none" }} />
 
       {!foto ? (
-        <div style={styles.acoes}>
-          <button style={styles.botaoSecundario} onClick={onCancelar}>
-            Cancelar
-          </button>
-          <button style={styles.botaoPrimario} onClick={capturar} disabled={!pronto}>
-            Capturar
-          </button>
-        </div>
+        <>
+          <div style={styles.acoes}>
+            <button style={styles.botaoSecundario} onClick={onCancelar}>
+              Cancelar
+            </button>
+            <button style={styles.botaoPrimario} onClick={capturar} disabled={!pronto}>
+              Capturar
+            </button>
+          </div>
+          {botaoFallback}
+        </>
       ) : (
         <div style={styles.acoes}>
           <button style={styles.botaoSecundario} onClick={tirarNovamente}>
@@ -180,4 +224,12 @@ const styles = {
     cursor: "pointer",
   },
   erroBox: { textAlign: "center", color: "var(--color-silver)" },
+  erroDica: { fontSize: 13, color: "var(--color-silver-dark)", marginTop: 8 },
+  linkFallback: {
+    fontSize: 13,
+    color: "var(--color-silver-dark)",
+    textDecoration: "underline",
+    cursor: "pointer",
+    textAlign: "center",
+  },
 };
