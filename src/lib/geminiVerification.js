@@ -93,6 +93,18 @@ function fileToPart(file) {
   };
 }
 
+const RETRYABLE_STATUS = new Set([429, 503]);
+const MAX_TENTATIVAS_GEMINI = 3;
+
+function isErroTransitorio(error) {
+  const status = error?.status ?? error?.error?.code;
+  return RETRYABLE_STATUS.has(Number(status));
+}
+
+function aguardar(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * @param {{nomeCadastro: string, oabCadastro: string, ufCadastro: string, documento: {mimeType: string, base64: string}, selfieRosto?: {mimeType: string, base64: string}}} params
  */
@@ -115,16 +127,33 @@ export async function analisarVerificacaoOab({
     parts.push(fileToPart(selfieRosto));
   }
 
-  const response = await client.models.generateContent({
-    model,
-    contents: [{ role: "user", parts }],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA,
-      temperature: 0,
-    },
-  });
+  // O Gemini ocasionalmente devolve 503 (sobrecarga) ou 429 (rate limit) —
+  // erros transitórios do provedor, não relacionados à qualidade da
+  // imagem. Tenta de novo com backoff antes de propagar o erro.
+  let ultimoErro;
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_GEMINI; tentativa++) {
+    try {
+      const response = await client.models.generateContent({
+        model,
+        contents: [{ role: "user", parts }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: RESPONSE_SCHEMA,
+          temperature: 0,
+        },
+      });
 
-  const text = response.text;
-  return JSON.parse(text);
+      return JSON.parse(response.text);
+    } catch (error) {
+      ultimoErro = error;
+
+      if (!isErroTransitorio(error) || tentativa === MAX_TENTATIVAS_GEMINI) {
+        throw error;
+      }
+
+      await aguardar(1000 * tentativa);
+    }
+  }
+
+  throw ultimoErro;
 }
