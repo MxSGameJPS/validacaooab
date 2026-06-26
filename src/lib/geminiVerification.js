@@ -1,64 +1,16 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import OpenAI from "openai";
 
-let ai = null;
+let client = null;
 
 function getClient() {
-  if (ai) return ai;
+  if (client) return client;
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY não configurada.");
 
-  ai = new GoogleGenAI({ apiKey });
-  return ai;
+  client = new OpenAI({ apiKey, baseURL: process.env.OPENAI_BASE_URL });
+  return client;
 }
-
-const RESPONSE_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    documento_legivel: {
-      type: Type.BOOLEAN,
-      description: "Se foi possível ler os dados do documento com clareza.",
-    },
-    documento_parece_autentico: {
-      type: Type.BOOLEAN,
-      description:
-        "False se houver indícios de print de tela, edição, montagem ou documento de terceiro óbvio.",
-    },
-    nome_extraido: { type: Type.STRING },
-    oab_numero_extraido: { type: Type.STRING },
-    oab_uf_extraido: { type: Type.STRING },
-    nome_compativel: {
-      type: Type.BOOLEAN,
-      description: "Se nome_extraido corresponde ao nome informado no cadastro.",
-    },
-    oab_numero_compativel: { type: Type.BOOLEAN },
-    oab_uf_compativel: { type: Type.BOOLEAN },
-    confianca_facial: {
-      type: Type.STRING,
-      enum: ["ALTA", "MEDIA", "BAIXA", "NAO_AVALIADO"],
-      description:
-        "Similaridade estrutural entre o rosto da selfie e o rosto do documento, ignorando cabelo, barba, peso, idade da foto e iluminação.",
-    },
-    motivo_confianca_facial: { type: Type.STRING },
-    observacoes: {
-      type: Type.STRING,
-      description: "Qualquer inconsistência relevante encontrada.",
-    },
-  },
-  required: [
-    "documento_legivel",
-    "documento_parece_autentico",
-    "nome_extraido",
-    "oab_numero_extraido",
-    "oab_uf_extraido",
-    "nome_compativel",
-    "oab_numero_compativel",
-    "oab_uf_compativel",
-    "confianca_facial",
-    "motivo_confianca_facial",
-    "observacoes",
-  ],
-};
 
 function buildPrompt({ nomeCadastro, oabCadastro, ufCadastro, temSelfieRosto }) {
   return `Você é um analista de compliance verificando o cadastro de um advogado em uma plataforma jurídica brasileira.
@@ -68,33 +20,48 @@ Dados informados pelo advogado no cadastro:
 - Número da OAB: ${oabCadastro}
 - UF da OAB: ${ufCadastro}
 
-Você receberá:
-1. Uma imagem ou PDF da Carteira/Credencial da OAB (CNA) do advogado.
-${temSelfieRosto ? "2. Uma selfie do rosto do advogado, para comparação facial com a foto do documento." : ""}
+Você recebe:
+1. Uma imagem ou PDF da Carteira/Credencial da OAB (CNA) do advogado. CRITÉRIO PRINCIPAL.
+${temSelfieRosto ? "2. Uma selfie do rosto do advogado, para uma checagem facial secundária e opcional." : ""}
 
 Tarefas:
 1. Extraia do documento: nome completo, número da OAB e UF.
-2. Compare cada campo extraído com o que foi informado no cadastro. Pequenas variações de acentuação, abreviação de nomes do meio, ou formatação do número da OAB (pontos, hífen) NÃO devem ser tratadas como incompatibilidade.
-3. Avalie sinais de fraude: foto de tela, documento adulterado, marcas de edição, baixa resolução proposital, etc. em "documento_parece_autentico".
+2. Compare cada campo com o cadastro. Pequenas variações de acentuação, abreviação de nomes do meio ou formatação do número da OAB (pontos, hífen) NÃO contam como incompatibilidade.
+3. Avalie sinais de fraude no documento (foto de tela, adulteração, montagem) em "documento_parece_autentico".
 ${
   temSelfieRosto
-    ? `4. Compare o rosto da selfie com o rosto da foto do documento. Avalie SIMILARIDADE ESTRUTURAL (formato do rosto, olhos, nariz, orelhas, proporções faciais) e IGNORE diferenças temporárias como corte de cabelo, barba, peso, maquiagem, idade da foto do documento ou qualidade/iluminação da selfie. Seja permissivo: o objetivo é pegar fraude grosseira (pessoa claramente diferente), não fazer biometria forense. Retorne "ALTA" se claramente a mesma pessoa, "MEDIA" se plausivelmente a mesma pessoa com dúvida razoável, "BAIXA" se há indícios fortes de serem pessoas diferentes.`
-    : '4. Não há selfie de rosto para comparar — retorne "confianca_facial": "NAO_AVALIADO".'
-}
-5. Responda exclusivamente no formato JSON definido pelo schema.`;
+    ? `4. CHECAGEM FACIAL SECUNDÁRIA (prioridade mínima): compare de forma permissiva o rosto da selfie com o rosto do documento, avaliando apenas similaridade estrutural geral. IGNORE cabelo, barba, peso, idade da foto e iluminação. O objetivo é só pegar fraude grosseira (pessoa claramente diferente). Se não conseguir avaliar com segurança, retorne "NAO_AVALIADO" — não invente. Valores: "ALTA", "MEDIA", "BAIXA", "NAO_AVALIADO".`
+    : '4. Não há selfie de rosto. Retorne "confianca_facial": "NAO_AVALIADO".'
 }
 
-function fileToPart(file) {
-  return {
-    inlineData: {
-      mimeType: file.mimeType,
-      data: file.base64,
-    },
-  };
+Responda SOMENTE com JSON válido neste formato exato:
+{
+  "documento_legivel": true,
+  "documento_parece_autentico": true,
+  "nome_extraido": "",
+  "oab_numero_extraido": "",
+  "oab_uf_extraido": "",
+  "nome_compativel": true,
+  "oab_numero_compativel": true,
+  "oab_uf_compativel": true,
+  "confianca_facial": "NAO_AVALIADO",
+  "motivo_confianca_facial": "",
+  "observacoes": ""
+}`;
 }
 
-const RETRYABLE_STATUS = new Set([429, 503]);
-const MAX_TENTATIVAS_GEMINI = 3;
+function fileToContentPart(file, nomeArquivo) {
+  const dataUrl = `data:${file.mimeType};base64,${file.base64}`;
+
+  if (file.mimeType === "application/pdf") {
+    return { type: "file", file: { filename: nomeArquivo, file_data: dataUrl } };
+  }
+
+  return { type: "image_url", image_url: { url: dataUrl } };
+}
+
+const RETRYABLE_STATUS = new Set([429, 500, 503]);
+const MAX_TENTATIVAS = 3;
 
 function isErroTransitorio(error) {
   const status = error?.status ?? error?.error?.code;
@@ -115,42 +82,43 @@ export async function analisarVerificacaoOab({
   documento,
   selfieRosto,
 }) {
-  const client = getClient();
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const openai = getClient();
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
-  const parts = [
-    { text: buildPrompt({ nomeCadastro, oabCadastro, ufCadastro, temSelfieRosto: Boolean(selfieRosto) }) },
-    fileToPart(documento),
+  const content = [
+    {
+      type: "text",
+      text: buildPrompt({
+        nomeCadastro,
+        oabCadastro,
+        ufCadastro,
+        temSelfieRosto: Boolean(selfieRosto),
+      }),
+    },
+    fileToContentPart(documento, "cna.pdf"),
   ];
 
   if (selfieRosto) {
-    parts.push(fileToPart(selfieRosto));
+    content.push(fileToContentPart(selfieRosto, "selfie.jpg"));
   }
 
-  // O Gemini ocasionalmente devolve 503 (sobrecarga) ou 429 (rate limit) —
-  // erros transitórios do provedor, não relacionados à qualidade da
-  // imagem. Tenta de novo com backoff antes de propagar o erro.
   let ultimoErro;
-  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_GEMINI; tentativa++) {
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
     try {
-      const response = await client.models.generateContent({
+      const completion = await openai.chat.completions.create({
         model,
-        contents: [{ role: "user", parts }],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: RESPONSE_SCHEMA,
-          temperature: 0,
-        },
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content }],
       });
 
-      return JSON.parse(response.text);
+      const texto = completion.choices?.[0]?.message?.content || "{}";
+      return JSON.parse(texto);
     } catch (error) {
       ultimoErro = error;
-
-      if (!isErroTransitorio(error) || tentativa === MAX_TENTATIVAS_GEMINI) {
+      if (!isErroTransitorio(error) || tentativa === MAX_TENTATIVAS) {
         throw error;
       }
-
       await aguardar(1000 * tentativa);
     }
   }
